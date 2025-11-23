@@ -1,0 +1,6 @@
+Customers,Formulation,Status,Time_s,Objective
+5,DFJ,Optimal,0.01,43.0
+10,DFJ,Optimal,0.12,56.0
+15,DFJ,Optimal,8.0,102.0
+20,DFJ,Time Limit Exceeded (Solver),613.01,N/A
+25,DFJ,Time Limit Exceeded (Building),600.0,N/A
