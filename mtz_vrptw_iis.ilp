@@ -1,0 +1,28 @@
+\ Model MTZ_VRPTW_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+\ Signature: 0x6b9ca993b399a09d
+Minimize
+ 
+Subject To
+ Out_0: x[0,1] + x[0,2] + x[0,3] + x[0,4] + x[0,5] = 1
+ Out_1: x[1,0] + x[1,2] + x[1,3] + x[1,4] + x[1,5] = 1
+ Time_Link_0_1: 1e+07 x[0,1] + t[0] - t[1] + w[0] <= 9.999981e+06
+ Time_Link_0_2: 1e+07 x[0,2] + t[0] - t[2] + w[0] <= 9.999979e+06
+ Time_Link_0_3: 1e+07 x[0,3] + t[0] - t[3] + w[0] <= 9.999984e+06
+ Time_Link_0_4: 1e+07 x[0,4] + t[0] - t[4] + w[0] <= 9.999982e+06
+ Time_Link_0_5: 1e+07 x[0,5] + t[0] - t[5] + w[0] <= 9.999985e+06
+ Time_Link_1_0: 1e+07 x[1,0] - t[0] + t[1] + w[1] <= 9.999891e+06
+ Time_Link_1_2: 1e+07 x[1,2] + t[1] - t[2] + w[1] <= 9.999908e+06
+ Time_Link_1_3: 1e+07 x[1,3] + t[1] - t[3] + w[1] <= 9.999906e+06
+ Time_Link_1_4: 1e+07 x[1,4] + t[1] - t[4] + w[1] <= 9.999907e+06
+ Time_Link_1_5: 1e+07 x[1,5] + t[1] - t[5] + w[1] <= 9.999906e+06
+Bounds
+ t[0] free
+ t[1] >= 912
+ -infinity <= t[2] <= 870
+ -infinity <= t[3] <= 146
+ -infinity <= t[4] <= 782
+ -infinity <= t[5] <= 67
+Binaries
+ x[0,1] x[0,2] x[0,3] x[0,4] x[0,5] x[1,0] x[1,2] x[1,3] x[1,4] x[1,5]
+End

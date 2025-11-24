@@ -5,7 +5,7 @@ import math
 
 #parameters
 timelimit = 600
-instance_sizes = [5, 10, 15]
+instance_sizes = [5]
 
 #load data
 nodes_df = pd.read_excel("customers.xlsx",sheet_name="Nodes")
@@ -30,38 +30,38 @@ def dist(i, j):
 for n in instance_sizes:
 
     node_ids = [depot_id] + customer_id[:n]
-    M_big = len(node_ids)
+    n_nr = len(node_ids)
 
     MTZ_model = gp.Model("MTZ_TSP")
     MTZ_model.setParam('TimeLimit', timelimit)
     MTZ_model.setParam('OutputFlag', 1)
 
-    x = MTZ_model.addVars(M_big, M_big, vtype=GRB.BINARY, name="x")
+    x = MTZ_model.addVars(n_nr, n_nr, vtype=GRB.BINARY, name="x")
 
-    for i in range(M_big):
+    for i in range(n_nr):
         x[i, i].ub = 0
     
-    u = MTZ_model.addVars(M_big, vtype=GRB.CONTINUOUS, lb=0, ub=M_big-1, name="u")
+    u = MTZ_model.addVars(n_nr, vtype=GRB.CONTINUOUS, lb=0, ub=n_nr-1, name="u")
 
     # objective
     MTZ_model.setObjective(gp.quicksum(dist(node_ids[i], node_ids[j]) * x[i,j]
-                                   for i in range(M_big) for j in range(M_big)),
+                                   for i in range(n_nr) for j in range(n_nr)),
                        GRB.MINIMIZE)
 
     #constraints
-    for i in range(M_big):
-        MTZ_model.addConstr(gp.quicksum(x[i,j] for j in range(M_big) if j != i) == 1)
-        MTZ_model.addConstr(gp.quicksum(x[j,i] for j in range(M_big) if j != i) == 1)
+    for i in range(n_nr):
+        MTZ_model.addConstr(gp.quicksum(x[i,j] for j in range(n_nr) if j != i) == 1)
+        MTZ_model.addConstr(gp.quicksum(x[j,i] for j in range(n_nr) if j != i) == 1)
 
     MTZ_model.addConstr(u[0] == 0)  
-    for i in range(1, M_big):
+    for i in range(1, n_nr):
         MTZ_model.addConstr(u[i] >= 1)
-        MTZ_model.addConstr(u[i] <= M_big - 1)
+        MTZ_model.addConstr(u[i] <= n_nr - 1)
 
-    for i in range(1, M_big):
-        for j in range(1, M_big):
+    for i in range(1, n_nr):
+        for j in range(1, n_nr):
             if i != j:
-                MTZ_model.addConstr(u[i] - u[j] + M_big * x[i,j] <= M_big - 1)
+                MTZ_model.addConstr(u[i] - u[j] + n_nr * x[i,j] <= n_nr - 1)
 
     MTZ_model.optimize()
 
@@ -71,8 +71,8 @@ for n in instance_sizes:
         tour = [0]   # start at depot
         current = 0
 
-        for a in range(M_big - 1):
-            for j in range(M_big):
+        for a in range(n_nr - 1):
+            for j in range(n_nr):
                 if sol[current, j] > 0.5:
                     tour.append(j)
                     current = j
@@ -83,3 +83,4 @@ for n in instance_sizes:
         print("Objective =", MTZ_model.objVal)
         print("Tour =", tour_ids)
 
+    
