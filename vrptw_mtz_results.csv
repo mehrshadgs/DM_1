@@ -1,6 +1,0 @@
-Customers,Formulation,Status,Time_s,Objective,Num_Vehicles
-5,VRPTW_MTZ,Optimal,0.0,43.0,1
-10,VRPTW_MTZ,Optimal,0.0,59.0,1
-15,VRPTW_MTZ,Optimal,0.0,142.0,2
-20,VRPTW_MTZ,Optimal,0.01,176.0,3
-25,VRPTW_MTZ,Optimal,0.01,192.0,3

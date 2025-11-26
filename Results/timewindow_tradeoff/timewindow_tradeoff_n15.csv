@@ -1,0 +1,7 @@
+Window_Factor,Num_Vehicles,Total_Distance,Objective_Value,Runtime_s,Status
+0.5,2,171.0,171.0,0.01,Feasible
+0.75,2,142.0,142.0,0.01,Feasible
+1.0,2,142.0,142.0,0.01,Feasible
+1.25,2,142.0,142.0,0.01,Feasible
+1.5,2,142.0,142.0,0.01,Feasible
+2.0,2,142.0,142.0,0.01,Feasible

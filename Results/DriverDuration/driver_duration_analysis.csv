@@ -1,0 +1,6 @@
+Customers,Dist_Unlim,Veh_Unlim,Dist_7h,Veh_7h,Status_7h
+5,43.0,1,75.0,2,Optimal
+10,59.0,1,125.0,3,Optimal
+15,142.0,2,269.0,5,Optimal
+20,176.0,3,378.0,7,Optimal
+25,192.0,3,418.0,8,Optimal
