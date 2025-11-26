@@ -33,13 +33,6 @@ wheels/
 
 # Data files (optional - comment out if you want to track these)
 # *.xlsx
-# *.csv
-
-# Results and output files
-mtz_results.csv
-dfj_results.csv
-dfj_improve_results.csv
-vrptw_mtz_results.csv
 
 # Gurobi
 *.lp
