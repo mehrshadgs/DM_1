@@ -5,7 +5,7 @@ from gurobipy import GRB
 import time
 from itertools import combinations
 import matplotlib.pyplot as plt
-
+import os
 
 
 def solve_tsp_mtz(df_nodes, n_customers, time_limit):
@@ -602,6 +602,104 @@ def analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, vehic
     return df_tradeoff
 
 
+def modify_time_windows(df_requests, factor):
+    """
+    Modifies time windows by scaling their width around the center point.
+    
+    Args:
+        df_requests: Original requests DataFrame
+        factor: Scaling factor (0.5 = half width, 1.0 = original, 2.0 = double width)
+    
+    Returns:
+        Modified DataFrame with scaled time windows
+    """
+    df_modified = df_requests.copy()
+    
+    for id in df_modified.index:
+        original_start = df_requests.loc[id, 'start']
+        original_end = df_requests.loc[id, 'end']
+        
+        center = (original_start + original_end) / 2
+        half_width = (original_end - original_start) / 2
+        
+        new_half_width = half_width * factor
+        df_modified.loc[id, 'start'] = int(max(0, center - new_half_width))
+        df_modified.loc[id, 'end'] = int(center + new_half_width)
+    
+    return df_modified
+
+
+def analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, window_factors, time_limit=600):
+
+    results = []
+    
+    
+    for factor in window_factors:
+        
+        df_requests_modified = modify_time_windows(df_requests, factor)
+        
+        result = solve_vrptw_MTZ(df_nodes, df_requests_modified, df_Fleet,
+                                n_customers=n_customers,
+                                time_limit=time_limit,
+                                vehicle_cost=0)
+        
+        if result['status'] == 'Optimal':
+            results.append({
+                'Window_Factor': factor,
+                'Num_Vehicles': result['num_vehicles'],
+                'Total_Distance': result['total_distance'],
+                'Objective_Value': result['objective_value'],
+                'Runtime_s': round(result['runtime'], 2),
+                'Status': 'Feasible'
+            })
+        else:
+            results.append({
+                'Window_Factor': factor,
+                'Num_Vehicles': 'N/A',
+                'Total_Distance': 'N/A',
+                'Objective_Value': 'N/A',
+                'Runtime_s': round(result['runtime'], 2),
+                'Status': 'Infeasible'
+            })
+    
+    df_tradeoff = pd.DataFrame(results)
+    plot_timewindow_tradeoff(df_tradeoff, n_customers)
+    
+    return df_tradeoff
+
+
+def plot_timewindow_tradeoff(df_tradeoff, n_customers):
+    """
+    Plots the trade-off between time window width and solution quality.
+    """
+    import os
+    os.makedirs('Plots_timeWindow', exist_ok=True)
+    
+    
+    df_feasible = df_tradeoff[df_tradeoff['Status'] == 'Feasible'].copy()
+    
+    plt.figure(figsize=(10, 7))
+    
+    plt.plot(df_feasible['Window_Factor'], df_feasible['Total_Distance'],
+             'bo-', linewidth=2.5, markersize=12, label='Total Distance')
+    plt.xlabel('Time Window Factor (1.0 = Original Width)', fontsize=13)
+    plt.ylabel('Total Distance', fontsize=13)
+    plt.title(f'Trade-off: Distance vs Time Window Width (n={n_customers})', fontsize=15, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.axvline(x=1.0, color='red', linestyle='--', alpha=0.5, label='Original')
+    plt.legend(fontsize=11)
+    
+
+    
+    plt.tight_layout()
+    plt.savefig(f'Plots_timeWindow/timewindow_tradeoff_n{n_customers}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+  
+    
+
+
+
 def plot_vehicle_tradeoff(df_tradeoff, n_customers):
     import os
     os.makedirs('Plots', exist_ok=True)
@@ -731,18 +829,35 @@ if __name__ == "__main__":
 
 
     # Analyze vehicle-distance trade-off for different customer counts
-    vehicle_costs = [-100, -50, 0, 10, 20, 50, 100]
+    # vehicle_costs = [-100, -50, 0, 10, 20, 50, 100]
     
-    for n in [5, 10, 15, 20, 25]:
+    # for n in [5, 10, 15, 20, 25]:
         
-        df_tradeoff = analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, 
-                                               n_customers=n, 
-                                               vehicle_costs=vehicle_costs,
-                                               time_limit=600)
+    #     df_tradeoff = analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, 
+    #                                            n_customers=n, 
+    #                                            vehicle_costs=vehicle_costs,
+    #                                            time_limit=600)
         
 
         
-        df_tradeoff.to_csv(f"vehicle_distance_tradeoff_n{n}.csv", index=False)
+    #     df_tradeoff.to_csv(f"vehicle_distance_tradeoff_n{n}.csv", index=False)
+    
+    
+    # Analyze time window width trade-off
+
+    window_factors = [0.25,0.5, 0.75, 1.0, 1.25, 1.5, 2.0,3.0,4.0, 5.0]
+    
+    for n in [5, 10, 15, 20, 25]:
+        df_tw_tradeoff = analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet,
+                                                      n_customers=n,
+                                                      window_factors=window_factors,
+                                                      time_limit=600)
+        
+        df_tw_tradeoff.to_csv(f"timewindow_tradeoff_n{n}.csv", index=False)
+        
+        
+
+    
     
 
     
