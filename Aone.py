@@ -365,7 +365,9 @@ def test_dfj_improve(df_nodes, instances, time_limit):
     return df_dfj_results    
 
 def plot_dfj_iterations(iteration_results):
-
+    import os
+    os.makedirs('Plots', exist_ok=True)
+    
     iterations = list(iteration_results.keys())
     objectives = list(iteration_results.values())
     
@@ -377,12 +379,14 @@ def plot_dfj_iterations(iteration_results):
     plt.grid(True, alpha=0.3)
     plt.xticks(iterations)
     plt.tight_layout()
-    plt.show()
+    plt.savefig('Plots/dfj_iterations.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
 
-def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600):
+def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600, vehicle_cost=0):
     """
     Solves VRPTW using MTZ formulation with capacity and time window constraints.
+    
     """
     
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
@@ -463,19 +467,24 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
         model.addConstr(t[i] >= early_start[i])
         model.addConstr(t[i] <= late_start[i])
     
-    M_time = 2 * max_time
+   
     
 
     for i in range(n_nodes):
         for j in range(1, n_nodes):  
             if i != j:
                 model.addConstr(
-                    t[i] + service_times[i] + dist_matrix[i][j] - t[j] <= M_time * (1 - x[i, j]),
+                    t[i] + service_times[i] + dist_matrix[i][j] - t[j] <= BigM * (1 - x[i, j]),
                     
                 )
     
     
-    model.setObjective(gp.quicksum(dist_matrix[i][j] * x[i, j] for i in range(n_nodes) for j in range(n_nodes) if i != j), GRB.MINIMIZE) 
+    # Objective: Minimize total distance + cost of vehicles used
+    # Number of vehicles = number of arcs leaving depot
+    num_vehicles = gp.quicksum(x[0, j] for j in range(1, n_nodes))
+    total_distance = gp.quicksum(dist_matrix[i][j] * x[i, j] for i in range(n_nodes) for j in range(n_nodes) if i != j)
+    
+    model.setObjective(total_distance + vehicle_cost * num_vehicles, GRB.MINIMIZE)
 
     model.optimize()
     
@@ -528,7 +537,11 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
         result["routes"] = routes
         result["num_vehicles"] = len(routes)
         
-        plot_vrptw_routes(nodes, routes, coords)
+        # Calculate actual distance traveled (excluding vehicle cost)
+        total_distance = sum(dist_matrix[route[i]][route[i+1]] for route in routes for i in range(len(route)-1))
+        result["total_distance"] = total_distance
+        
+        plot_vrptw_routes(nodes, routes, coords, n_customers, vehicle_cost)
         
 
 
@@ -537,13 +550,13 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
     return result
 
 
-def test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances, time_limit):
-
+def test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances, time_limit, vehicle_cost=0):
+    
     vrptw_results = []
     
     for n in instances:
         
-        result = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n, time_limit=time_limit)
+        result = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n, time_limit=time_limit, vehicle_cost=vehicle_cost)
         
         vrptw_results.append({
             "Customers": n,
@@ -551,7 +564,9 @@ def test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances, time_limit):
             "Status": result['status'],
             "Time_s": round(result['runtime'], 2),
             "Objective": result['objective_value'] if result['objective_value'] is not None else "N/A",
-            "Num_Vehicles": result.get('num_vehicles', "N/A")
+            "Distance": result.get('total_distance', "N/A"),
+            "Num_Vehicles": result.get('num_vehicles', "N/A"),
+            "Vehicle_Cost": vehicle_cost
         })
     
     df_vrptw_results = pd.DataFrame(vrptw_results)
@@ -560,8 +575,63 @@ def test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances, time_limit):
     return df_vrptw_results
 
 
-def plot_vrptw_routes(nodes, routes, coords):
+def analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, vehicle_costs, time_limit=600):
 
+    results = []
+
+    
+    for cost in vehicle_costs:
+        result = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n_customers, 
+                                 time_limit=time_limit, vehicle_cost=cost)
+        
+        if result['status'] == 'Optimal':
+            results.append({
+                'Vehicle_Cost': cost,
+                'Num_Vehicles': result['num_vehicles'],
+                'Total_Distance': result['total_distance'],
+                'Objective_Value': result['objective_value'],
+                'Runtime_s': round(result['runtime'], 2)
+            })
+            print(f"  → Vehicles: {result['num_vehicles']}, Distance: {result['total_distance']:.2f}\n")
+    
+    df_tradeoff = pd.DataFrame(results)
+    df_tradeoff.to_csv("vehicle_distance_tradeoff.csv", index=False)
+    
+    plot_vehicle_tradeoff(df_tradeoff, n_customers)
+    
+    return df_tradeoff
+
+
+def plot_vehicle_tradeoff(df_tradeoff, n_customers):
+    import os
+    os.makedirs('Plots', exist_ok=True)
+    
+    plt.figure(figsize=(10, 7))
+    
+    plt.plot(df_tradeoff['Num_Vehicles'], df_tradeoff['Total_Distance'], 
+             'go-', linewidth=2.5, markersize=12, label='Pareto Solutions')
+    plt.xlabel('Number of Vehicles', fontsize=13)
+    plt.ylabel('Total Distance', fontsize=13)
+    plt.title(f'Trade-off: Vehicles vs Distance (n={n_customers})', fontsize=15, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=11)
+    
+    for _, row in df_tradeoff.iterrows():
+        plt.annotate(f"cost={int(row['Vehicle_Cost'])}", 
+                    xy=(row['Num_Vehicles'], row['Total_Distance']),
+                    xytext=(10, 10), textcoords='offset points',
+                    fontsize=9, alpha=0.7)
+    
+    plt.tight_layout()
+    plt.savefig(f'Plots/vehicle_tradeoff_n{n_customers}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+
+
+def plot_vrptw_routes(nodes, routes, coords, n_customers, vehicle_cost):
+    import os
+    os.makedirs('Plots', exist_ok=True)
+    
     plt.figure(figsize=(12, 10))
     
     # Define colors for different vehicles
@@ -609,10 +679,12 @@ def plot_vrptw_routes(nodes, routes, coords):
     
 
     plt.title('VRPTW Solution - Vehicle Routes', fontsize=14, fontweight='bold')
+    plt.legend(loc='upper right')
     plt.grid(True, alpha=0.3)
     plt.axis('equal')
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f'Plots/vrptw_routes_n{n_customers}_cost{vehicle_cost}.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
 
 
@@ -656,9 +728,22 @@ if __name__ == "__main__":
     #print("EXPERIMENTS COMPLETE!")
     #print("="*70)
 
-    solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=25, time_limit=600)
 
-    #test_vrptw_mtz(df_nodes, df_requests, df_Fleet, [5, 10, 15, 20, 25], time_limit=600)
 
-    # Optionally visualize the largest instance
+    # Analyze vehicle-distance trade-off for different customer counts
+    vehicle_costs = [-100, -50, 0, 10, 20, 50, 100]
+    
+    for n in [5, 10, 15, 20, 25]:
+        
+        df_tradeoff = analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, 
+                                               n_customers=n, 
+                                               vehicle_costs=vehicle_costs,
+                                               time_limit=600)
+        
+
+        
+        df_tradeoff.to_csv(f"vehicle_distance_tradeoff_n{n}.csv", index=False)
+    
+
+    
 
