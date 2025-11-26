@@ -83,7 +83,6 @@ def solve_tsp_mtz(df_nodes, n_customers, time_limit):
         
     return result
 
-
 def solve_tsp_dfj(df_nodes, n_customers, time_limit):
 
     start_time = time.time()
@@ -186,7 +185,6 @@ def solve_tsp_dfj(df_nodes, n_customers, time_limit):
                 "runtime": time.time() - start_time
             }
     
-
 def test_mtz(df_nodes, instances, time_limit):
     
     
@@ -216,7 +214,6 @@ def test_mtz(df_nodes, instances, time_limit):
     
     return df_mtz_results
 
-
 def test_dfj(df_nodes, instances, time_limit):
     
     dfj_naive_results = []
@@ -244,7 +241,6 @@ def test_dfj(df_nodes, instances, time_limit):
     
     return df_dfj_results
 
-
 def find_subtours(nodes,edges):
     
     next_node = {}
@@ -266,8 +262,7 @@ def find_subtours(nodes,edges):
             tours.append(tour)
             
     return tours
-    
-    
+        
 def solve_tsp_dfj_improve(df_nodes, n_customers, time_limit):
     
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
@@ -370,27 +365,300 @@ def test_dfj_improve(df_nodes, instances, time_limit):
     return df_dfj_results    
 
 def plot_dfj_iterations(iteration_results):
+
     iterations = list(iteration_results.keys())
     objectives = list(iteration_results.values())
     
     plt.figure(figsize=(10, 6))
-    plt.plot(iterations, objectives, marker='o')
-    plt.title('DFJ Improvement Iterations')
-    plt.xlabel('Iteration')
-    plt.ylabel('Objective Value')
-    plt.grid(True)
+    plt.plot(iterations, objectives, 'b-o', linewidth=2, markersize=8)
+    plt.xlabel('Iteration', fontsize=12)
+    plt.ylabel('Objective Value (Total Distance)', fontsize=12)
+    plt.title('DFJ Improved: Objective Value Evolution', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.xticks(iterations)
+    plt.tight_layout()
     plt.show()
 
-fname = "customers.xlsx" 
-df_nodes = pd.read_excel(fname, sheet_name=0, engine='openpyxl')
-df_requests = pd.read_excel(fname, sheet_name=1, engine='openpyxl')
-df_Fleet = pd.read_excel(fname, sheet_name=2, engine='openpyxl')
+
+def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600):
+    """
+    Solves VRPTW using MTZ formulation with capacity and time window constraints.
+    """
+    
+    nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
+    
+    coords = nodes[['cx', 'cy']].values
+    n_nodes = len(coords)
+    
+    
+    dist_matrix = np.zeros((n_nodes, n_nodes))
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            if i != j:
+                dist_matrix[i][j] = round(np.sqrt((coords[i][0] - coords[j][0])**2 + (coords[i][1] - coords[j][1])**2))
+    
+    capacity = df_Fleet.loc[0, 'capacity']
+    
+    ids = nodes['id'].values
+    demands = np.zeros(n_nodes)
+    service_times = np.zeros(n_nodes)
+    early_start = np.zeros(n_nodes)
+    late_start = np.zeros(n_nodes)
+    
+    for i in range(1, n_nodes):
+        node_id = ids[i]
+        req = df_requests[df_requests['id'] == node_id].iloc[0]
+        demands[i] = req['quantity']
+        service_times[i] = req['service_time']
+        early_start[i] = req['start']
+        late_start[i] = req['end']
+    
+    max_time = float(df_Fleet['max_travel_time'].iloc[0])
+    
+
+    
+    model = gp.Model("VRPTW_MTZ")
+    model.setParam('TimeLimit', time_limit)
+    model.setParam('OutputFlag', 0)
+    
+    x = model.addVars(n_nodes, n_nodes, vtype=GRB.BINARY, name="x")
+    
+    u = model.addVars(n_nodes, lb=0.0, ub=capacity, vtype=GRB.CONTINUOUS, name="u") # load variable
+    
+    early_start[0] = 0
+    late_start[0] = max_time
+    
+    t = model.addVars(n_nodes, lb=0.0, ub=max_time, vtype=GRB.CONTINUOUS, name="t") # time variable
+    
+    
+    model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 
+                      for i in range(1, n_nodes)), name="Leave_Customer")
+    
+
+    model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 
+                      for j in range(1, n_nodes)), name="Enter_Customer")
+    
+    model.addConstr(
+        gp.quicksum(x[0, j] for j in range(1, n_nodes)) == gp.quicksum(x[i, 0] for i in range(1, n_nodes)), name="Depot")
+    
+    BigM = 1e5
+    
+
+    for i in range(n_nodes): # load
+        for j in range(1, n_nodes): 
+            if i != j:
+                model.addConstr(
+                    u[j] >= u[i] + demands[j] - BigM * (1 - x[i, j]),
+                )
+    
+    # depot load zero
+    model.addConstr(u[0] == 0, name="Depot_Load_Zero")
+    
+    
+    for i in range(1, n_nodes):
+        model.addConstr(u[i] >= demands[i])
+        model.addConstr(u[i] <= capacity)
+    
+    for i in range(n_nodes):
+        model.addConstr(t[i] >= early_start[i])
+        model.addConstr(t[i] <= late_start[i])
+    
+    M_time = 2 * max_time
+    
+
+    for i in range(n_nodes):
+        for j in range(1, n_nodes):  
+            if i != j:
+                model.addConstr(
+                    t[i] + service_times[i] + dist_matrix[i][j] - t[j] <= M_time * (1 - x[i, j]),
+                    
+                )
+    
+    
+    model.setObjective(gp.quicksum(dist_matrix[i][j] * x[i, j] for i in range(n_nodes) for j in range(n_nodes) if i != j), GRB.MINIMIZE) 
+
+    model.optimize()
+    
+    result = {
+        "status": None,
+        "n_nodes": n_nodes,
+        "objective_value": None,
+        "tour": [],
+        "runtime": model.Runtime
+    }
+    
+    
+    # this is AI helped, for getting number of vehicles and routes
+    if model.status == GRB.OPTIMAL:
+        result["status"] = "Optimal"
+        result["objective_value"] = model.objVal
+
+        routes = []
+        
+        arcs = [(i, j) for i in range(n_nodes) for j in range(n_nodes) if i != j and x[i, j].X > 0.5]
+        
+        for j in range(1, n_nodes):
+            if x[0, j].X > 0.5:  
+                route = [0, j]  
+                current = j
+                
+                while True:
+                    # Find next node in route
+                    next_node = None
+                    for i, k in arcs:
+                        if i == current and k != 0:
+                            next_node = k
+                            break
+                        elif i == current and k == 0:
+                            next_node = 0
+                            break
+                    
+                    if next_node is None:
+                        break
+                    
+                    route.append(next_node)
+                    
+                    if next_node == 0:  
+                        break
+                    
+                    current = next_node
+                
+                routes.append(route)
+        
+        result["routes"] = routes
+        result["num_vehicles"] = len(routes)
+        
+        plot_vrptw_routes(nodes, routes, coords)
+        
+
+
+    
+    
+    return result
+
+
+def test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances, time_limit):
+
+    vrptw_results = []
+    
+    for n in instances:
+        
+        result = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n, time_limit=time_limit)
+        
+        vrptw_results.append({
+            "Customers": n,
+            "Formulation": "VRPTW_MTZ",
+            "Status": result['status'],
+            "Time_s": round(result['runtime'], 2),
+            "Objective": result['objective_value'] if result['objective_value'] is not None else "N/A",
+            "Num_Vehicles": result.get('num_vehicles', "N/A")
+        })
+    
+    df_vrptw_results = pd.DataFrame(vrptw_results)
+    df_vrptw_results.to_csv("vrptw_mtz_results.csv", index=False)
+    
+    return df_vrptw_results
+
+
+def plot_vrptw_routes(nodes, routes, coords):
+
+    plt.figure(figsize=(12, 10))
+    
+    # Define colors for different vehicles
+    colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+    
+    # Plot depot
+    plt.scatter(coords[0, 0], coords[0, 1], c='black', s=300, marker='s', 
+                label='Depot', zorder=5, edgecolors='white', linewidths=2)
+    plt.text(coords[0, 0], coords[0, 1], '0', fontsize=10, ha='center', va='center', 
+             color='white', fontweight='bold')
+    
+    # Plot each route
+    for idx, route in enumerate(routes):
+        color = colors[idx % len(colors)]
+        
+        # Plot route edges
+        for i in range(len(route) - 1):
+            node_from = route[i]
+            node_to = route[i + 1]
+            
+            x_coords = [coords[node_from, 0], coords[node_to, 0]]
+            y_coords = [coords[node_from, 1], coords[node_to, 1]]
+            
+            plt.plot(x_coords, y_coords, c=color, linewidth=2, alpha=0.7, zorder=1)
+            
+            # Add arrow
+            dx = x_coords[1] - x_coords[0]
+            dy = y_coords[1] - y_coords[0]
+            plt.arrow(x_coords[0] + dx*0.5, y_coords[0] + dy*0.5, 
+                     dx*0.15, dy*0.15, head_width=0.5, head_length=0.3, 
+                     fc=color, ec=color, alpha=0.6, zorder=2)
+        
+        # Plot customer nodes for this route (excluding depot)
+        route_customers = [node for node in route if node != 0]
+        if route_customers:
+            route_coords = coords[route_customers]
+            plt.scatter(route_coords[:, 0], route_coords[:, 1], 
+                       c=color, s=150, alpha=0.8, edgecolors='black', 
+                       linewidths=1.5, zorder=3, label=f'Vehicle {idx+1}')
+            
+            # Add node labels
+            for node in route_customers:
+                plt.text(coords[node, 0], coords[node, 1], str(node), 
+                        fontsize=8, ha='center', va='center', fontweight='bold')
+    
+
+    plt.title('VRPTW Solution - Vehicle Routes', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.axis('equal')
+    plt.tight_layout()
+    plt.show()
 
 
 
-df_nodes.head()
-df_requests.head()
+if __name__ == "__main__":
+    print("Loading data...")
+    fname = "customers.xlsx"
+    df_nodes = pd.read_excel(fname, sheet_name=0, engine='openpyxl')
+    df_requests = pd.read_excel(fname, sheet_name=1, engine='openpyxl')
+    df_Fleet = pd.read_excel(fname, sheet_name=2, engine='openpyxl')
+    
+    n_customers = 25
+    df_nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
 
-n_customers = 25
-df_nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
+    
+    # Test MTZ
+    #print("\n1. Testing MTZ Formulation...")
+   # df_mtz = test_mtz(df_nodes, [5, 10, 15, 20, 25], time_limit=600)
+    #print(df_mtz)
+    
+    # Test DFJ Naive
+    #print("\n2. Testing DFJ Naive Formulation...")
+    #df_dfj = test_dfj(df_nodes, [5, 10, 15, 20, 25], time_limit=600)
+    #print(df_dfj)
+    
+    # Test DFJ Improved
+    #print("\n3. Testing DFJ Improved Formulation...")
+    #df_dfj_imp = test_dfj_improve(df_nodes, [5, 10, 15, 20, 25], time_limit=600)
+    #print(df_dfj_imp)
+    
+    # Plot iteration analysis for largest instance
+    #print("\n4. Analyzing iterations for n=25...")
+   # result_25 = solve_tsp_dfj_improve(df_nodes, n_customers=25, time_limit=600)
+    #print(f"Status: {result_25['status']}")
+    #print(f"Objective: {result_25['objective_value']:.2f}")
+    #print(f"Runtime: {result_25['runtime']:.2f}s")
+    #print(f"Iterations: {len(result_25['iteration_results'])}")
+    
+    #plot_dfj_iterations(result_25['iteration_results'])
+    
+    #print("\n" + "="*70)
+    #print("EXPERIMENTS COMPLETE!")
+    #print("="*70)
+
+    solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=25, time_limit=600)
+
+    #test_vrptw_mtz(df_nodes, df_requests, df_Fleet, [5, 10, 15, 20, 25], time_limit=600)
+
+    # Optionally visualize the largest instance
 
