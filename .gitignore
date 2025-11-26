@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Data files (optional - comment out if you want to track these)
+# *.xlsx
+# *.csv
+
+# Results and output files
+mtz_results.csv
+dfj_results.csv
+dfj_improve_results.csv
+vrptw_mtz_results.csv
+
+# Gurobi
+*.lp
+*.mps
+*.sol
+*.ilp
+gurobi.log
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log
+check_feasibility.py
+
+# IDEs
+.idea/
+*.iml
