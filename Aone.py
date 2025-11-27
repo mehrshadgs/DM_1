@@ -488,19 +488,20 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
     
     
     model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 
-                      for i in range(1, n_nodes)), name="Leave_Customer")
+                      for i in range(1, n_nodes)))
     
 
     model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 
-                      for j in range(1, n_nodes)), name="Enter_Customer")
-    
+                      for j in range(1, n_nodes)))
+    #
     model.addConstr(
-        gp.quicksum(x[0, j] for j in range(1, n_nodes)) == gp.quicksum(x[i, 0] for i in range(1, n_nodes)), name="Depot")
+        gp.quicksum(x[0, j] for j in range(1, n_nodes)) == gp.quicksum(x[i, 0] for i in range(1, n_nodes))
+    )
     
     BigM = 1e5
     
 
-    for i in range(n_nodes): # load
+    for i in range(n_nodes): #Capacity constraints
         for j in range(1, n_nodes): 
             if i != j:
                 model.addConstr(
@@ -510,18 +511,18 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
     # depot load zero
     model.addConstr(u[0] == 0, name="Depot_Load_Zero")
     
-    
+    # Load limits
     for i in range(1, n_nodes):
         model.addConstr(u[i] >= demands[i])
         model.addConstr(u[i] <= capacity)
     
+    # Time window constraints
     for i in range(n_nodes):
         model.addConstr(t[i] >= early_start[i])
         model.addConstr(t[i] <= late_start[i])
     
    
-    
-
+  # BigM time constraints
     for i in range(n_nodes):
         for j in range(1, n_nodes):  
             if i != j:
@@ -530,20 +531,29 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
                     
                 )
     
+    
+    # Driver duration 
     if driver_duration:
+        # rt_start[i] = time when the vehicle's route started, same for all customers on the same route
         rt_start = model.addVars(n_nodes, lb=0.0, ub=max_time, vtype=GRB.CONTINUOUS)
+        
+        # Initialize route start time: when vehicle leaves depot directly to customer j
+        # If x[0,j]=1: rt_start[j] = t[j] - dist[0,j] (arrival time - travel time = departure time from depot)
         for j in range(1, n_nodes):
             model.addConstr(rt_start[j] <= t[j] - dist_matrix[0][j] + BigM * (1 - x[0, j]))
-        for i in range(1, n_nodes):
+        
+
+        # To ensures all customers on a route have the same route start time # this is suggested by AI
+        for i in range(1, n_nodes):  
             for j in range(1, n_nodes):
                 if i != j:
+                    # When x[i,j]=1: rt_start[j] >= rt_start[i] and rt_start[j] <= rt_start[i]
+                    # Result: rt_start[j] = rt_start[i] (same route start time)
                     model.addConstr(rt_start[j] >= rt_start[i] - BigM * (1 - x[i, j]))
                     model.addConstr(rt_start[j] <= rt_start[i] + BigM * (1 - x[i, j]))
         
-        for i in range(1, n_nodes):
-            # If x[i,0]=1 (vehicle returns to depot from i):
-            # Finish Time = t[i] + service[i] + dist[i,0]
-            # Duration = Finish Time - rt_start[i]
+        for i in range(1, n_nodes): 
+            
             finish_time = t[i] + service_times[i] + dist_matrix[i][0]
             model.addConstr(finish_time - rt_start[i] <= 420 + BigM * (1 - x[i, 0]))
     
@@ -604,11 +614,11 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
         result["routes"] = routes
         result["num_vehicles"] = len(routes)
         
-        # Calculate actual distance traveled (excluding vehicle cost)
+        # AI wrriten
         total_distance = sum(dist_matrix[route[i]][route[i+1]] for route in routes for i in range(len(route)-1))
         result["total_distance"] = total_distance
         
-        # Create unique plot based on parameters
+        # Create unique plot based on parameters # Ai wrriten to not overwrite the plots
         duration_suffix = "_duration" if driver_duration else ""
         plot_vrptw_routes(nodes, routes, coords, n_customers, vehicle_cost, driver_duration)
         
