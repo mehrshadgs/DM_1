@@ -9,10 +9,7 @@ import os
 
 
 def solve_tsp_mtz(df_nodes, n_customers, time_limit):
-    """
-    Solves the Traveling Salesperson Problem (TSP) using the MTZ formulation.
-    
-    """
+
     
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
     
@@ -572,11 +569,9 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
     
     return result
 
-def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta=20, time_limit=600, vehicle_cost=0):
-    """
-    Solves VRPTW using Time-Expanded Network formulation.
-    Building this step by step.
-    """
+def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta=1, time_limit=600):
+
+    start_time = time.time()
     
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
     coords = nodes[['cx', 'cy']].values
@@ -588,7 +583,9 @@ def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta
             if i != j:
                 dist_matrix[i][j] = round(np.sqrt((coords[i][0] - coords[j][0])**2 + (coords[i][1] - coords[j][1])**2))
     
-    capacity = df_Fleet.loc[0, 'capacity']
+    capacity = float(df_Fleet.loc[0, 'capacity'])
+    max_travel_time = float(df_Fleet.loc[0, 'max_travel_time'])
+    
     ids = nodes['id'].values
     demands = np.zeros(n_nodes)
     service_times = np.zeros(n_nodes)
@@ -602,59 +599,147 @@ def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta
         service_times[i] = req['service_time']
         early_start[i] = req['start']
         late_start[i] = req['end']
-    
-    max_time = float(df_Fleet['max_travel_time'].iloc[0])
+        
+    # Depot time window
     early_start[0] = 0
-    late_start[0] = max_time
-    
-
-    time_periods = list(range(0, int(max_time) + delta, delta))
+    late_start[0] = max_travel_time
 
 
-    feasible_times = {}
+    node_time_map = {}  
+    # feasible time points for each node
     for i in range(n_nodes):
-        feasible_times[i] = [t for t in time_periods if early_start[i] <= t <= late_start[i]]
+        node_time_map[i] = []
+        start_t = int(np.ceil(early_start[i] / delta) * delta)
+        end_t = int(np.floor(late_start[i] / delta) * delta)
+        for t in range(start_t, end_t + 1, delta):
+            node_time_map[i].append(t)
     
-    
-    # this part is AI helped, to create time-expanded network arcs
-    arcs = []   #Arcs (i,t,j,t')
-    arc_distance = {}  
+            
+    arcs = []
+    arc_costs = {}
+    # arcs: (i, t, j, t') from node i at time t to node j at time t'
     
     for i in range(n_nodes):
-        for t in feasible_times[i]:
+        for t in node_time_map[i]:
             for j in range(n_nodes):
-                if i == j:
-                    continue
+                if i == j: continue
                 
-                travel_time = dist_matrix[i][j]  # 1km = 1min
-                travel_time_rounded = int(delta * int(np.ceil(travel_time / delta)))
-                
-                earliest_arrival = int(t + service_times[i] + travel_time_rounded)
-                
-                # Create arcs to all feasible times at j that are >= earliest arrival
-                for t_prime in feasible_times[j]:
-                    if t_prime >= earliest_arrival:
-                        arcs.append((i, int(t), j, t_prime))
-                        arc_distance[(i, int(t), j, t_prime)] = float(dist_matrix[i][j])
-  
-    print(f"\nTime windows and feasible times:")
-    for i in range(min(n_nodes, 6)):  # Show first 6 nodes
-        print(f"  Node {i}: EarlyStart={early_start[i]:.0f}, LateStart={late_start[i]:.0f}, Service={service_times[i]:.0f}")
-        print(f"           Feasible times ({len(feasible_times[i])}): {feasible_times[i]}")
-    print(f"\nTotal arcs created: {len(arcs)}")
-    if len(arcs) > 0:
-        print(f"Sample arcs: {arcs[:10]}")
-    
-    
-    #################
+                arrival_at_j = t + service_times[i] + dist_matrix[i][j] # speed is 1 per unit distance
+                min_t_prime = int(np.ceil(arrival_at_j / delta) * delta)
+                # print(arrival_at_j)
+                for t_prime in node_time_map[j]:
+                    if t_prime >= min_t_prime:
+                        arc = (i, t, j, t_prime)
+                        arcs.append(arc)
+                        arc_costs[arc] = dist_matrix[i][j]
+
+
     model = gp.Model("VRPTW_TimeExpanded")
     model.setParam('TimeLimit', time_limit)
     model.setParam('OutputFlag', 0)
     
+    
+    x = model.addVars(arcs, vtype=GRB.BINARY, name="x")
+    
+    # y[i,t] = 1 if customer i is serviced starting at time t
+    y_keys = [(i,t) for i in range(1, n_nodes) for t in node_time_map[i]]
+    y = model.addVars(y_keys, vtype=GRB.BINARY, name="y") # [1,100] , [1,105] ...   
+    
+    u = model.addVars(n_nodes, lb=0.0, ub=capacity, vtype=GRB.CONTINUOUS, name="u")
+    
+    
+    # One Visit
+    for i in range(1, n_nodes):
+        model.addConstr(gp.quicksum(y[i, t] for t in node_time_map[i]) == 1)
+        
+    # in and out
+    for i in range(1, n_nodes):
+        for t in node_time_map[i]:
+            outgoing_arcs = [a for a in arcs if a[0]==i and a[1]==t] # all arcs starting from (i,t)
+            if not outgoing_arcs:
+                model.addConstr(y[i,t] == 0) # If vehicle cannot leave, then y[i,t]=0 it is too late
+            else:
+                model.addConstr(gp.quicksum(x[a] for a in outgoing_arcs) == y[i,t])
+                
    
+    for j in range(1, n_nodes):
+        for t_prime in node_time_map[j]:
+            incoming_arcs = [a for a in arcs if a[2]==j and a[3]==t_prime] # all arcs arriving at (j,t')
+            model.addConstr(gp.quicksum(x[a] for a in incoming_arcs) == y[j,t_prime])
+
+    depot_outgoing = [a for a in arcs if a[0]==0] # arcs leaving depot
+    depot_incoming = [a for a in arcs if a[2]==0] # arcs arriving at depot
+    model.addConstr(gp.quicksum(x[a] for a in depot_outgoing) == gp.quicksum(x[a] for a in depot_incoming))
+    
+    
+    BigM = 1e5
+    
+    for a in arcs:
+        i, t, j, t_prime = a
+        if i != 0 and j != 0: 
+            model.addConstr(u[j] >= u[i] + demands[j] - BigM * (1 - x[a]))
+            
+            
+    model.addConstr(u[0] == 0)
+    for i in range(1, n_nodes):
+        model.addConstr(u[i] >= demands[i])
+        model.addConstr(u[i] <= capacity)
+
+
+
+    model.setObjective(gp.quicksum(arc_costs[a] * x[a] for a in arcs) , GRB.MINIMIZE)
+    
+    model.optimize()
+    
+    result = {
+        "status": "Infeasible",
+        "objective_value": None,
+        "total_distance": None,
+        "num_vehicles": None,
+        "runtime": time.time() - start_time,
+        "routes": []
+    }
+    
+    if model.status == GRB.OPTIMAL:
+        result["status"] = "Optimal"
+        result["objective_value"] = model.objVal
+        result["total_distance"] = sum(arc_costs[a] * x[a].X for a in arcs if x[a].X > 0.5)
+        result["num_vehicles"] = sum(x[a].X for a in depot_outgoing if x[a].X > 0.5)
+        
+    elif model.status == GRB.TIME_LIMIT:
+        result["status"] = "Time Limit"
+        if model.SolCount > 0:
+            result["objective_value"] = model.objVal
+            result["total_distance"] = sum(arc_costs[a] * x[a].X for a in arcs if x[a].X > 0.5)
+            result["num_vehicles"] = sum(x[a].X for a in depot_outgoing if x[a].X > 0.5)
+            
+    return result
+
+def test_compare_formulations(df_nodes, df_requests, df_Fleet, instances, time_limit):
+
+    results = []
+    
+    for n in instances:
+        for delta in [1, 5, 10, 20]:
+            res_te = solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n, delta=delta, time_limit=time_limit)
+
+            results.append({
+                'Customers': n,
+                'Formulation': 'Time-Expanded',
+                'Delta': delta,
+                'Status': res_te['status'],
+                'Objective': res_te['objective_value'] if res_te['objective_value'] is not None else 'N/A',
+                'Distance': res_te.get('total_distance', 'N/A'),
+                'Runtime_s': round(res_te['runtime'], 2)
+            })
+    
+    df_comparison = pd.DataFrame(results)
+    os.makedirs(r"Results\TimeExpanded", exist_ok=True)
+    df_comparison.to_csv(r"Results\TimeExpanded\mtz_vs_timeexpanded.csv", index=False)
+    
 
     
-    return 
+    return df_comparison
 
 def test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances, time_limit, vehicle_cost=0):
     
@@ -1025,8 +1110,10 @@ if __name__ == "__main__":
     #    analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers=n, window_factors=[0.5, 0.75, 1.0, 1.25, 1.5, 2.0], time_limit=600)
     
     #test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25], time_limit=600, vehicle_cost=0)
-    test_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25],vehicle_costs=[-200, -500, -1000, 20, 50, 200, 300, 500,2000000],time_limit=600)
+    #test_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25],vehicle_costs=[-200, -500, -1000, 20, 50, 200, 300, 500,2000000],time_limit=600)
     
+    
+    #test_compare_formulations(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25], time_limit=300)
 
     
 
