@@ -9,7 +9,15 @@ import os
 
 
 def solve_tsp_mtz(df_nodes, n_customers, time_limit):
-
+    """
+    Solves TSP using Miller-Tucker-Zemlin (MTZ) formulation.
+    
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        n_customers (int): Number of customer nodes to consider (including depot as node 0).
+        time_limit (int): Time limit for the solver in seconds.
+        
+    """
     
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
     
@@ -34,17 +42,17 @@ def solve_tsp_mtz(df_nodes, n_customers, time_limit):
 
     u = model.addVars(range(1, n_nodes), lb=1.0, ub=n_nodes - 1.0, vtype=GRB.CONTINUOUS, name="u")
 
+    # Leaving constraints
     model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 
-                      for i in range(n_nodes)), name="Leave")
+                      for i in range(n_nodes)))
     
-
+    # Entering constraints
     model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 
-                      for j in range(n_nodes)), name="Enter")
+                      for j in range(n_nodes)))
 
     model.addConstrs(
         (u[i] - u[j] + n_nodes * x[i, j] <= n_nodes - 1 
          for i in range(1, n_nodes) for j in range(1, n_nodes) if i != j), 
-        name="MTZ"
     )
 
     model.setObjective(
@@ -59,7 +67,6 @@ def solve_tsp_mtz(df_nodes, n_customers, time_limit):
         "status": None,
         "n_nodes": n_nodes,
         "objective_value": None,
-        "best_bound": None,
         "tour": [],
         "runtime": model.Runtime
     }
@@ -67,13 +74,11 @@ def solve_tsp_mtz(df_nodes, n_customers, time_limit):
     if model.status == GRB.OPTIMAL:
         result["status"] = "Optimal"
         result["objective_value"] = model.objVal
-        result["gap"] = 0.0
         
         
     elif model.status == GRB.TIME_LIMIT and model.SolCount > 0:
         result["status"] = "Time Limit"
-        result["objective_value"] = model.objVal  
-        result["gap"] = model.MIPGap * 100       
+        result["objective_value"] = model.objVal       
         
 
         
@@ -81,6 +86,15 @@ def solve_tsp_mtz(df_nodes, n_customers, time_limit):
     return result
 
 def solve_tsp_dfj(df_nodes, n_customers, time_limit):
+    """
+    Solves TSP using Dantzig-Fulkerson-Johnson (DFJ)
+    
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        n_customers (int): Number of customer nodes to consider (including depot as node 0).
+        time_limit (int): Time limit for the solver in seconds.
+        
+    """
 
     start_time = time.time()
 
@@ -95,7 +109,8 @@ def solve_tsp_dfj(df_nodes, n_customers, time_limit):
                 d = np.sqrt((coords[i][0] - coords[j][0])**2 + (coords[i][1] - coords[j][1])**2)
                 dist_matrix[i][j] = round(d)
 
-    # From this line is lot of help form AI, in this function, I was having a problem how to handel errors and time limits
+    # AI helped to handle exceptions and time limits, try and except blocks were added by AI
+    # Adding each subtour constraint iteratively was also AI helped (the code not the idea)
     try:
            
             model = gp.Model("TSP_DFJ")
@@ -114,14 +129,13 @@ def solve_tsp_dfj(df_nodes, n_customers, time_limit):
             
             x = model.addVars(n_nodes, n_nodes, vtype=GRB.BINARY, name="x")
             
-            model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 for i in range(n_nodes)), name="Leave")
-            model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 for j in range(n_nodes)), name="Enter")
+            model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 for i in range(n_nodes)))
+            model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 for j in range(n_nodes)))
             
 
             
             for r in range(2, n_nodes):
-                for subset in combinations(range(n_nodes), r):
-                    
+                for subset in combinations(range(n_nodes), r): # this is AI suggestion
                   
                     if (time.time() - start_time) > time_limit:
                         return {
@@ -158,8 +172,7 @@ def solve_tsp_dfj(df_nodes, n_customers, time_limit):
             elif model.status == GRB.TIME_LIMIT:
                 return {"status": "Time Limit Exceeded (Solver)", "n_nodes": n_nodes, "objective_value": "N/A", "runtime": total_runtime}
             else:
-                return {"status": f"Other Status ({model.status})", "n_nodes": n_nodes, "objective_value": "N/A", "runtime": total_runtime}
-
+                return {"status": f"Other Status ({model.status})", "n_nodes": n_nodes, "objective_value": "N/A", "runtime": total_runtime} 
     except gp.GurobiError as e:
             return {
                 "status": f"Gurobi Error: {str(e)}", 
@@ -183,7 +196,12 @@ def solve_tsp_dfj(df_nodes, n_customers, time_limit):
             }
     
 def test_mtz(df_nodes, instances, time_limit):
+    """Tests the MTZ formulation on a set of instances.
     
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        instances (list): List of integers representing the number of customer nodes to test.
+        time_limit (int): Time limit for each instance in seconds."""
     
     mtz_results = []
     
@@ -193,7 +211,7 @@ def test_mtz(df_nodes, instances, time_limit):
         mtz_time = res_mtz['runtime']
         mtz_obj = res_mtz['objective_value'] if res_mtz['objective_value'] is not None else "N/A"
         mtz_status = res_mtz['status']
-        mtz_bound = res_mtz.get('best_bound', None)
+
     
         mtz_results.append({
             "Customers": n,
@@ -201,7 +219,6 @@ def test_mtz(df_nodes, instances, time_limit):
             "Status": mtz_status,
             "Time_s": round(mtz_time, 2),
             "Objective": mtz_obj,
-            "Best_Bound": round(mtz_bound, 2) if mtz_bound is not None else None
         })
     
 
@@ -214,8 +231,16 @@ def test_mtz(df_nodes, instances, time_limit):
     return df_mtz_results
 
 def test_dfj(df_nodes, instances, time_limit):
+    """Tests the DFJ formulation on a set of instances.
     
-    dfj_naive_results = []
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        instances (list): List of integers representing the number of customer nodes to test.
+        time_limit (int): Time limit for each instance in seconds.
+        
+    """
+    
+    dfj_results = []
 
     for n in instances:
         
@@ -225,7 +250,7 @@ def test_dfj(df_nodes, instances, time_limit):
         dfj_status = res_dfj['status']
         
         
-        dfj_naive_results.append({
+        dfj_results.append({
             "Customers": n,
             "Formulation": "DFJ",
             "Status": dfj_status,
@@ -233,7 +258,7 @@ def test_dfj(df_nodes, instances, time_limit):
             "Objective": dfj_obj
         })
     
-    df_dfj_results = pd.DataFrame(dfj_naive_results)
+    df_dfj_results = pd.DataFrame(dfj_results)
     
     os.makedirs(r"Results\DFJ", exist_ok=True)
     df_dfj_results.to_csv(r"Results\DFJ\dfj_results.csv", index=False)
@@ -243,7 +268,12 @@ def test_dfj(df_nodes, instances, time_limit):
     return df_dfj_results
 
 def find_subtours(nodes,edges):
-    
+    """
+    Finds all subtours in the given set of nodes and edges.
+    Args:
+        nodes: DataFrame of nodes.
+        edges: List of tuples representing edges (u, v).
+    """
     next_node = {}
     for u, v in edges:
         next_node[u] = v
@@ -251,7 +281,7 @@ def find_subtours(nodes,edges):
     visited = [False]* len(nodes)
     
     tours = []
-    
+    # find all cycles
     for i in range(len(nodes)):
         if not visited[i]:
             tour = []
@@ -265,7 +295,14 @@ def find_subtours(nodes,edges):
     return tours
         
 def solve_tsp_dfj_improve(df_nodes, n_customers, time_limit):
+    """
+    Solves the TSP using the DFJ formulation with iterative subtour elimination.
     
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        n_customers (int): Number of customer nodes to consider.
+        time_limit (int): Time limit for the solver in seconds.
+    """
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
     
     coords = nodes[['cx', 'cy']].values
@@ -285,8 +322,8 @@ def solve_tsp_dfj_improve(df_nodes, n_customers, time_limit):
     
     x = model.addVars(n_nodes, n_nodes, vtype=GRB.BINARY, name="x")
     
-    model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 for i in range(n_nodes)), name="Leave")
-    model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 for j in range(n_nodes)), name="Enter")
+    model.addConstrs((gp.quicksum(x[i, j] for j in range(n_nodes) if j != i) == 1 for i in range(n_nodes)))
+    model.addConstrs((gp.quicksum(x[i, j] for i in range(n_nodes) if i != j) == 1 for j in range(n_nodes)))
     
     
     model.setObjective(gp.quicksum(dist_matrix[i][j] * x[i, j] for i in range(n_nodes) for j in range(n_nodes) if i != j), GRB.MINIMIZE)
@@ -312,15 +349,14 @@ def solve_tsp_dfj_improve(df_nodes, n_customers, time_limit):
                     
         subtours = find_subtours(nodes, edges)
         
-        
+        # if there is only one subtour, we are done
         if len(subtours) == 1:
             break
         
+        # Add subtour constraints for each subtour found
         for subtour in subtours:
             model.addConstr(
-            gp.quicksum(x[i, j] for i in subtour for j in subtour if i != j) <= len(subtour) - 1, 
-                name=f"SubtourElim_Iter{iteration}"
-            ) # This line is with help of AI
+            gp.quicksum(x[i, j] for i in subtour for j in subtour if i != j) <= len(subtour) - 1, ) 
             
         iteration_results[iteration] = model.objVal
                     
@@ -339,8 +375,14 @@ def solve_tsp_dfj_improve(df_nodes, n_customers, time_limit):
     return result
     
 def test_dfj_improve(df_nodes, instances, time_limit):
-    
-    dfj_naive_results = []
+    """
+    Tests the DFJ formulation on a set of instances.
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        instances (list): List of integers representing the number of customer nodes to test.
+        time_limit (int): Time limit for each instance in seconds.
+    """
+    dfj_results = []
 
     for n in instances:
         
@@ -350,7 +392,7 @@ def test_dfj_improve(df_nodes, instances, time_limit):
         dfj_status = res_dfj['status']
         
         
-        dfj_naive_results.append({
+        dfj_results.append({
             "Customers": n,
             "Formulation": "DFJ Improve",
             "Status": dfj_status,
@@ -358,7 +400,7 @@ def test_dfj_improve(df_nodes, instances, time_limit):
             "Objective": dfj_obj
         })
     
-    df_dfj_results = pd.DataFrame(dfj_naive_results)
+    df_dfj_results = pd.DataFrame(dfj_results)
     
     os.makedirs(r"Results\DFJ", exist_ok=True)
     df_dfj_results.to_csv(r"Results\DFJ\dfj_improve_results.csv", index=False)
@@ -368,9 +410,8 @@ def test_dfj_improve(df_nodes, instances, time_limit):
     return df_dfj_results    
 
 def plot_dfj_iterations(iteration_results):
-    
-   
-    
+
+    # Asked AI to make it pretty
     iterations = list(iteration_results.keys())
     objectives = list(iteration_results.values())
     
@@ -389,6 +430,14 @@ def plot_dfj_iterations(iteration_results):
 def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600, vehicle_cost=0, driver_duration= False):
     """
     Solves VRPTW using MTZ formulation with capacity and time window constraints.
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        df_requests (pd.DataFrame): DataFrame containing request details
+        df_Fleet (pd.DataFrame): DataFrame containing fleet details
+        n_customers (int): Number of customer nodes to consider (including depot as node 0).
+        time_limit (int): Time limit for the solver in seconds.
+        vehicle_cost (float): Fixed cost per vehicle used.
+        driver_duration (bool): Whether to enforce driver duration constraints.
     
     """
     
@@ -482,21 +531,21 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
                 )
     
     if driver_duration:
-        rt_start = model.addVars(n_nodes, lb=0.0, ub=max_time, vtype=GRB.CONTINUOUS, name="rt_start")
+        rt_start = model.addVars(n_nodes, lb=0.0, ub=max_time, vtype=GRB.CONTINUOUS)
         for j in range(1, n_nodes):
-            model.addConstr(rt_start[j] <= t[j] - dist_matrix[0][j] + BigM * (1 - x[0, j]), f"StartInit_{j}")
+            model.addConstr(rt_start[j] <= t[j] - dist_matrix[0][j] + BigM * (1 - x[0, j]))
         for i in range(1, n_nodes):
             for j in range(1, n_nodes):
                 if i != j:
-                    model.addConstr(rt_start[j] >= rt_start[i] - BigM * (1 - x[i, j]), f"PropStart_LB_{i}_{j}")
-                    model.addConstr(rt_start[j] <= rt_start[i] + BigM * (1 - x[i, j]), f"PropStart_UB_{i}_{j}")
+                    model.addConstr(rt_start[j] >= rt_start[i] - BigM * (1 - x[i, j]))
+                    model.addConstr(rt_start[j] <= rt_start[i] + BigM * (1 - x[i, j]))
         
         for i in range(1, n_nodes):
             # If x[i,0]=1 (vehicle returns to depot from i):
             # Finish Time = t[i] + service[i] + dist[i,0]
             # Duration = Finish Time - rt_start[i]
             finish_time = t[i] + service_times[i] + dist_matrix[i][0]
-            model.addConstr(finish_time - rt_start[i] <= 420 + BigM * (1 - x[i, 0]), f"Duration_{i}")
+            model.addConstr(finish_time - rt_start[i] <= 420 + BigM * (1 - x[i, 0]))
     
 
     num_vehicles = gp.quicksum(x[0, j] for j in range(1, n_nodes))
@@ -570,7 +619,17 @@ def solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers, time_limit=600
     return result
 
 def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta=1, time_limit=600):
-
+    """"
+    Solves VRPTW using Time-Expanded Network formulation.
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        df_requests (pd.DataFrame): DataFrame containing request details
+        df_Fleet (pd.DataFrame): DataFrame containing fleet details
+        n_customers (int): Number of customer nodes to consider (including depot as node 0).
+        delta (int): Time discretization interval.
+        time_limit (int): Time limit for the solver in seconds.
+        
+    """
     start_time = time.time()
     
     nodes = df_nodes[df_nodes['id'] <= n_customers].copy()
@@ -582,6 +641,7 @@ def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta
         for j in range(n_nodes):
             if i != j:
                 dist_matrix[i][j] = round(np.sqrt((coords[i][0] - coords[j][0])**2 + (coords[i][1] - coords[j][1])**2))
+    
     
     capacity = float(df_Fleet.loc[0, 'capacity'])
     max_travel_time = float(df_Fleet.loc[0, 'max_travel_time'])
@@ -612,8 +672,8 @@ def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta
         start_t = int(np.ceil(early_start[i] / delta) * delta)
         end_t = int(np.floor(late_start[i] / delta) * delta)
         for t in range(start_t, end_t + 1, delta):
-            node_time_map[i].append(t)
-    
+            node_time_map[i].append(t) # [0,5,10,...] if delta=5
+     
             
     arcs = []
     arc_costs = {}
@@ -686,7 +746,6 @@ def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta
         model.addConstr(u[i] <= capacity)
 
 
-
     model.setObjective(gp.quicksum(arc_costs[a] * x[a] for a in arcs) , GRB.MINIMIZE)
     
     model.optimize()
@@ -716,7 +775,14 @@ def solve_vrptw_TimeExpanded(df_nodes, df_requests, df_Fleet, n_customers, delta
     return result
 
 def test_compare_formulations(df_nodes, df_requests, df_Fleet, instances, time_limit):
-
+    """Compares MTZ and Time-Expanded formulations on a set of VRPTW instances.
+    Args:
+        df_nodes (pd.DataFrame): DataFrame containing node coordinates with columns 'id', 'cx', 'cy'.
+        df_requests (pd.DataFrame): DataFrame containing request details
+        df_Fleet (pd.DataFrame): DataFrame containing fleet details
+        instances (list): List of integers representing the number of customer nodes to test.
+        time_limit (int): Time limit for each instance in seconds.
+        """
     results = []
     
     for n in instances:
@@ -773,8 +839,7 @@ def analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, vehic
 
     
     for cost in vehicle_costs:
-        result = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n_customers, 
-                                 time_limit=time_limit, vehicle_cost=cost)
+        result = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n_customers, time_limit=time_limit, vehicle_cost=cost)
         
         if result['status'] == 'Optimal':
             results.append({
@@ -784,7 +849,6 @@ def analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, vehic
                 'Objective_Value': result['objective_value'],
                 'Runtime_s': round(result['runtime'], 2)
             })
-            print(f"  → Vehicles: {result['num_vehicles']}, Distance: {result['total_distance']:.2f}\n")
     
     df_tradeoff = pd.DataFrame(results)
     os.makedirs(r"Results\VehicleTradeoff", exist_ok=True)
@@ -820,113 +884,10 @@ def modify_time_windows(df_requests, factor):
     
     return df_modified
 
-def analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, window_factors, time_limit=600):
 
-    results = []
-    
-    
-    for factor in window_factors:
-        
-        df_requests_modified = modify_time_windows(df_requests, factor)
-        
-        result = solve_vrptw_MTZ(df_nodes, df_requests_modified, df_Fleet,
-                                n_customers=n_customers,
-                                time_limit=time_limit,
-                                vehicle_cost=0)
-        
-        if result['status'] == 'Optimal':
-            results.append({
-                'Window_Factor': factor,
-                'Num_Vehicles': result['num_vehicles'],
-                'Total_Distance': result['total_distance'],
-                'Objective_Value': result['objective_value'],
-                'Runtime_s': round(result['runtime'], 2),
-                'Status': 'Feasible'
-            })
-        else:
-            results.append({
-                'Window_Factor': factor,
-                'Num_Vehicles': 'N/A',
-                'Total_Distance': 'N/A',
-                'Objective_Value': 'N/A',
-                'Runtime_s': round(result['runtime'], 2),
-                'Status': 'Infeasible'
-            })
-    
-    df_tradeoff = pd.DataFrame(results)
-    plot_timewindow_tradeoff(df_tradeoff, n_customers)
-    
-    return df_tradeoff
-
-def plot_timewindow_tradeoff(df_tradeoff, n_customers):
-
-    
-
-    plt.figure(figsize=(10, 7))
-    
-    plt.plot(df_tradeoff['Window_Factor'], df_tradeoff['Total_Distance'],
-             'bo-', linewidth=2.5, markersize=12, label='Total Distance')
-    plt.xlabel('Time Window Factor (1.0 = Original Width)', fontsize=13)
-    plt.ylabel('Total Distance', fontsize=13)
-    plt.title(f'Trade-off: Distance vs Time Window Width (n={n_customers})', fontsize=15, fontweight='bold')
-    plt.grid(True, alpha=0.3)
-    plt.axvline(x=1.0, color='red', linestyle='--', alpha=0.5, label='Original')
-    plt.legend(fontsize=11)
-    
-
-    
-    plt.tight_layout()
-    os.makedirs('Results/Plots_timeWindow', exist_ok=True)
-    plt.savefig(f'Results/Plots_timeWindow/timewindow_tradeoff_n{n_customers}.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    
-
-    
-   
-    
-    plt.figure(figsize=(12, 8))
-    
-    # Plot the Pareto frontier
-    plt.plot(df_tradeoff['Num_Vehicles'], df_tradeoff['Total_Distance'], 
-             'go-', linewidth=3, markersize=14, label='Pareto Solutions', markeredgecolor='darkgreen', markeredgewidth=2)
-    
-    plt.xlabel('Number of Vehicles', fontsize=14, fontweight='bold')
-    plt.ylabel('Total Distance (km)', fontsize=14, fontweight='bold')
-    plt.title(f'Trade-off: Vehicles vs Distance (n={n_customers})', fontsize=16, fontweight='bold', pad=20)
-    plt.grid(True, alpha=0.4, linestyle='--')
-    plt.legend(fontsize=12, loc='best')
-    
-    # Add cost annotations with better positioning
-    for idx, row in df_tradeoff.iterrows():
-        plt.annotate(f"cost={int(row['Vehicle_Cost'])}", 
-                    xy=(row['Num_Vehicles'], row['Total_Distance']),
-                    xytext=(10, -15) if idx % 2 == 0 else (10, 15), 
-                    textcoords='offset points',
-                    fontsize=10, fontweight='bold',
-                    bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.7),
-                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0', lw=1.5))
-    
-    # Set integer ticks for number of vehicles
-    vehicles = df_tradeoff['Num_Vehicles'].values
-    plt.xticks(range(int(vehicles.min()), int(vehicles.max()) + 1))
-    
-    # Add margin to axes
-    x_margin = 0.5
-    y_range = df_tradeoff['Total_Distance'].max() - df_tradeoff['Total_Distance'].min()
-    y_margin = y_range * 0.1 if y_range > 0 else 5
-    
-    plt.xlim(vehicles.min() - x_margin, vehicles.max() + x_margin)
-    plt.ylim(df_tradeoff['Total_Distance'].min() - y_margin, 
-             df_tradeoff['Total_Distance'].max() + y_margin)
-    
-    plt.tight_layout()
-    os.makedirs(r"Results\VehicleTradeoff", exist_ok=True)
-    plt.savefig(f'Results/VehicleTradeoff/vehicle_tradeoff_n{n_customers}.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    
 def plot_vrptw_routes(nodes, routes, coords, n_customers, vehicle_cost, driver_duration=False):
    
-    
+    # AI wriiteen
     
     plt.figure(figsize=(12, 10))
     
@@ -995,25 +956,16 @@ def plot_vrptw_routes(nodes, routes, coords, n_customers, vehicle_cost, driver_d
     plt.savefig(f'Results/VRPTW_Plots/vrptw_n{n_customers}{duration_suffix}{cost_suffix}.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-def test_driver_duration(df_nodes, df_requests, df_Fleet, instances, time_limit=600):
-    
+def test_driver_duration(df_nodes, df_requests, df_Fleet, instances, time_limit=600):  
     
     results = []
 
-
-    for n in instances:
-        print(f"\nProcessing Instance n={n}...")
-        
-    
-        res_unlimited = solve_vrptw_MTZ(
-            df_nodes, df_requests, df_Fleet, 
-            n_customers=n, 
+    for n in instances:        
+        res_unlimited = solve_vrptw_MTZ(df_nodes, df_requests, df_Fleet, n_customers=n, 
             time_limit=time_limit,
             vehicle_cost=0,
             driver_duration=False
         )
-        
-
         res_limited = solve_vrptw_MTZ(
             df_nodes, df_requests, df_Fleet, 
             n_customers=n, 
@@ -1047,11 +999,10 @@ def test_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, instances, vehicle_co
     for n in instances:
     
         analyze_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, 
-                                               n_customers=n, 
+                                        n_customers=n, 
                                                vehicle_costs=vehicle_costs,
                                                time_limit=time_limit)
     
-    print("\nVehicle trade-off analysis complete!")
     
     return
 
@@ -1080,7 +1031,6 @@ def analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, wi
     df_tradeoff = pd.DataFrame(results)
     os.makedirs(r"Results\timewindow_tradeoff", exist_ok=True)
     df_tradeoff.to_csv(rf"Results\timewindow_tradeoff\timewindow_tradeoff_n{n_customers}.csv", index=False)
-    plot_timewindow_tradeoff(df_tradeoff, n_customers)
     
     
     return df_tradeoff
@@ -1106,8 +1056,8 @@ if __name__ == "__main__":
     
     #test_driver_duration(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25], time_limit=600)  
     
-   # for n in [5,10, 15, 20,25]:
-    #    analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers=n, window_factors=[0.5, 0.75, 1.0, 1.25, 1.5, 2.0], time_limit=600)
+    #for n in [5,10, 15, 20,25]:
+     #       analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers=n, window_factors=[0.5, 0.75, 1.0, 1.25, 1.5, 2.0], time_limit=600)
     
     #test_vrptw_mtz(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25], time_limit=600, vehicle_cost=0)
     #test_vehicle_tradeoff(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25],vehicle_costs=[-200, -500, -1000, 20, 50, 200, 300, 500,2000000],time_limit=600)

@@ -4,4 +4,4 @@ Window_Factor,Num_Vehicles,Total_Distance,Objective_Value,Runtime_s,Status
 1.0,3,176.0,176.0,0.01,Feasible
 1.25,3,176.0,176.0,0.01,Feasible
 1.5,3,176.0,176.0,0.01,Feasible
-2.0,3,176.0,176.0,0.01,Feasible
+2.0,3,176.0,176.0,0.02,Feasible
