@@ -894,7 +894,6 @@ def modify_time_windows(df_requests, factor):
     
     return df_modified
 
-
 def plot_vrptw_routes(nodes, routes, coords, n_customers, vehicle_cost, driver_duration=False):
    
     # AI wriiteen
@@ -1045,6 +1044,40 @@ def analyze_timewindow_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, wi
     
     return df_tradeoff
 
+def analyze_timewindow_delta_tradeoff(df_nodes, df_requests, df_Fleet, n_customers, window_factor, deltas, time_limit=600):
+    
+    results = []
+    for n in n_customers:  
+        
+        for factor in window_factor :
+            df_requests_modified = modify_time_windows(df_requests, factor)
+            
+            for delta in deltas:
+                
+                result = solve_vrptw_TimeExpanded(
+                    df_nodes, df_requests_modified, df_Fleet, 
+                    n_customers=n, delta=delta, time_limit=300
+                )
+                
+                results.append({
+                    'Customers': n,
+                    'Window_Factor': factor,
+                    'Delta': delta,
+                    'Status': result['status'],
+                    'Objective': result['objective_value'] if result['objective_value'] is not None else 'N/A',
+                    'Distance': result.get('total_distance', 'N/A'),
+                    'Num_Vehicles': result.get('num_vehicles', 'N/A'),
+                    'Runtime_s': round(result['runtime'], 2)
+                })
+                
+    
+    df_results = pd.DataFrame(results)
+    os.makedirs(r"Results\TimeExpandedWindows", exist_ok=True)
+    df_results.to_csv(r"Results\TimeExpandedWindows\timeexpanded_window_analysis.csv", index=False)
+    
+    
+    return 
+
 if __name__ == "__main__":
     print("Loading data...")
     fname = "customers.xlsx"
@@ -1053,7 +1086,6 @@ if __name__ == "__main__":
     df_Fleet = pd.read_excel(fname, sheet_name=2, engine='openpyxl')
     
 
- 
     #test_mtz(df_nodes, [5, 10, 15, 20, 25], time_limit=600)
     
     
@@ -1074,8 +1106,10 @@ if __name__ == "__main__":
     
     
     #test_compare_formulations(df_nodes, df_requests, df_Fleet, instances=[5, 10, 15, 20, 25], time_limit=300)
-
     
+    analyze_timewindow_delta_tradeoff(df_nodes, df_requests, df_Fleet, n_customers=[5, 10, 15], window_factor=[0.5, 1.0,2.0], deltas=[1, 5, 10, 20], time_limit=600)
+    
+
 
     
 
